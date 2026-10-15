@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Wortuhr</title>
+<style>
+:root{--wall:#0b0b0c;--ui:#dcdcdc}
+*{box-sizing:border-box}
+html{min-height:100%;background:var(--wall)}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;background:var(--wall);
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+  font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent;overflow:hidden}
+
+/* ---------- Uhr ---------- */
+.frame{
+  --s:min(88vw,80vh,720px);--off:rgba(255,255,255,.13);--on:#fffaf0;--glow:255,244,220;
+  width:var(--s);aspect-ratio:1;position:relative;border-radius:calc(var(--s)*.004);
+  padding:calc(var(--s)*.114) calc(var(--s)*.137) calc(var(--s)*.164);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07),0 calc(var(--s)*.003) calc(var(--s)*.008) rgba(0,0,0,.5),0 calc(var(--s)*.03) calc(var(--s)*.07) rgba(0,0,0,.42);
+}
+.grid{width:100%;height:100%;display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(10,1fr);
+  font-family:"DIN Alternate","DIN 1451","Bahnschrift","Helvetica Neue",Arial,sans-serif;
+  font-size:calc(var(--s)*.052);font-weight:500;user-select:none;-webkit-user-select:none}
+.grid span{display:flex;align-items:center;justify-content:center;color:var(--off);transition:color .9s ease,text-shadow .9s ease}
+.grid span.on{color:var(--on);text-shadow:0 0 .1em rgba(var(--glow),.9),0 0 .5em rgba(var(--glow),.65),0 0 1.1em rgba(var(--glow),.3)}
+.dot{position:absolute;width:calc(var(--s)*.011);height:calc(var(--s)*.011);border-radius:50%;background:var(--off);transition:background .9s,box-shadow .9s}
+.dot.on{background:var(--on);box-shadow:0 0 .35em .08em rgba(var(--glow),.9),0 0 1em rgba(var(--glow),.5)}
+.d0{left:calc(var(--s)*.055);top:calc(var(--s)*.055)}
+.d1{right:calc(var(--s)*.055);top:calc(var(--s)*.055)}
+.d2{right:calc(var(--s)*.055);bottom:calc(var(--s)*.055)}
+.d3{left:calc(var(--s)*.055);bottom:calc(var(--s)*.055)}
+@media (prefers-reduced-motion:reduce){.grid span,.dot,.sheet,.scrim{transition:none!important}}
+
+/* ---------- Bedienung ---------- */
+.fab{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);width:44px;height:44px;border-radius:50%;border:0;display:grid;place-items:center;
+  cursor:pointer;color:var(--ui);background:rgba(128,128,128,.2);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:10;opacity:.75;transition:opacity .2s}
+.fab:hover,.fab:focus-visible{opacity:1}
+.fab:focus-visible{outline:2px solid var(--ui);outline-offset:2px}
+.fab svg{width:22px;height:22px}
+#gear{right:calc(env(safe-area-inset-right,0px) + 12px)}
+#fs{right:calc(env(safe-area-inset-right,0px) + 64px)}
+.nofs #fs,.nofs #fsBtn{display:none}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .25s;z-index:19}
+.open .scrim{opacity:1;pointer-events:auto}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:min(380px,100vw);background:#1b1c1f;color:#ececec;z-index:20;
+  transform:translateX(102%);visibility:hidden;transition:transform .3s ease,visibility 0s .3s;overflow-y:auto;
+  padding:calc(env(safe-area-inset-top,0px) + 18px) 20px calc(env(safe-area-inset-bottom,0px) + 28px);box-shadow:-10px 0 40px rgba(0,0,0,.45);font-size:15px}
+.open .sheet{transform:none;visibility:visible;transition:transform .3s ease}
+.sheet header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.sheet h2{margin:0;font-size:1.25rem;font-weight:600}
+.sheet h3{margin:26px 0 10px;font-size:.78rem;letter-spacing:.09em;text-transform:uppercase;color:#9a9ca1;font-weight:600}
+.x{background:none;border:0;color:#ececec;font-size:1.6rem;line-height:1;width:40px;height:40px;cursor:pointer;border-radius:50%}
+.x:hover{background:rgba(255,255,255,.08)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.pill{font:inherit;color:#c9cacd;background:#26282c;border:1px solid transparent;border-radius:2rem;padding:.5rem 1rem;cursor:pointer}
+.pill[aria-pressed="true"]{color:#fff;border-color:#f4f1e8;background:#2f3136}
+.sws{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.sw{width:38px;height:38px;border-radius:50%;border:2px solid transparent;padding:0;cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.sw[aria-pressed="true"]{border-color:#f4f1e8;outline:2px solid #1b1c1f;outline-offset:-5px}
+.pick{display:inline-flex;align-items:center;gap:8px;color:#c9cacd;font-size:.85rem}
+.pick input{width:38px;height:38px;border:0;padding:0;background:none;border-radius:50%;cursor:pointer}
+.sheet button:focus-visible,.sheet input:focus-visible{outline:2px solid #f4f1e8;outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="frame" id="frame">
+  <div class="grid" id="grid"></div>
+  <i class="dot d0"></i><i class="dot d1"></i><i class="dot d2"></i><i class="dot d3"></i>
+</div>
+
+<button class="fab" id="fs" aria-label="Vollbild">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+</button>
+<button class="fab" id="gear" aria-label="Einstellungen" aria-haspopup="dialog" aria-controls="sheet">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+</button>
+<div class="scrim" id="scrim"></div>
+<aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Einstellungen"></aside>
+
+<script>
+const hours=(n)=>"h"+n;
+const L={};
+
+/* Muster nach den originalen QLOCKTWO-Frontplatten. Wort = [Zeile, Spalte, Länge] */
+
+/* ---------- Deutsch ---------- */
+L.de={name:"Deutsch",rows:["ESKISTAFÜNF","ZEHNZWANZIG","DREIVIERTEL","VORFUNKNACH","HALBAELFÜNF","EINSXAMZWEI","DREIPMJVIER","SECHSNLACHT","SIEBENZWÖLF","ZEHNEUNKUHR"],
+W:{ES:[0,0,2],IST:[0,3,3],MF:[0,7,4],MZ:[1,0,4],ZWANZIG:[1,4,7],DREI:[2,0,4],VIERTEL:[2,4,7],VOR:[3,0,3],NACH:[3,7,4],HALB:[4,0,4],
+ h1:[5,0,4],h1e:[5,0,3],h2:[5,7,4],h3:[6,0,4],h4:[6,7,4],h5:[4,7,4],h6:[7,0,5],h7:[8,0,6],h8:[7,7,4],h9:[9,3,4],h10:[9,0,4],h11:[4,5,3],h12:[8,6,5],UHR:[9,8,3]},
+f(H,M){const q=M/5|0,w=["ES","IST"];let h=H%12||12;if(q>=5)h=h%12+1;
+ const t=[[ "UHR"],["MF","NACH"],["MZ","NACH"],["VIERTEL","NACH"],["ZWANZIG","NACH"],["MF","VOR","HALB"],["HALB"],["MF","NACH","HALB"],["ZWANZIG","VOR"],["DREI","VIERTEL"],["MZ","VOR"],["MF","VOR"]][q];
+ return w.concat(t,h===1&&q===0?"h1e":hours(h));}};
+
+/* ---------- Schwäbisch ---------- */
+L.sw={name:"Schwäbisch",rows:["ESKISCHFUNK","DREIVIERTLA","ZEHNBIEFÜNF","NACHGERTVOR","HALBXFÜNFEI","OISECHSELFE","ZWOIEACHTED","DREIEZWÖLFE","ZEHNEUNEUHL","SIEBNEVIERE"],
+W:{ES:[0,0,2],ISCH:[0,3,4],DREI:[1,0,4],VIERTL:[1,4,6],MZ:[2,0,4],MF:[2,7,4],NACH:[3,0,4],VOR:[3,8,3],HALB:[4,0,4],
+ h1:[5,0,3],h2:[6,0,5],h3:[7,0,5],h4:[9,6,5],h5:[4,5,4],h6:[5,2,5],h7:[9,0,6],h8:[6,5,5],h9:[8,3,5],h10:[8,0,5],h11:[5,7,4],h12:[7,5,6]},
+f(H,M){const q=M/5|0;let h=H%12||12;if(q>=4)h=h%12+1;
+ const t=[[],["MF","NACH"],["MZ","NACH"],["VIERTL","NACH"],["MZ","VOR","HALB"],["MF","VOR","HALB"],["HALB"],["MF","NACH","HALB"],["MZ","NACH","HALB"],["DREI","VIERTL"],["MZ","VOR"],["MF","VOR"]][q];
+ return ["ES","ISCH"].concat(t,hours(h));}};
+
+/* ---------- English ---------- */
+L.en={name:"English",rows:["ITLISASAMPM","ACQUARTERDC","TWENTYFIVEX","HALFSTENFTO","PASTERUNINE","ONESIXTHREE","FOURFIVETWO","EIGHTELEVEN","SEVENTWELVE","TENSEOCLOCK"],
+W:{IT:[0,0,2],IS:[0,3,2],A:[1,0,1],QUARTER:[1,2,7],TWENTY:[2,0,6],MF:[2,6,4],HALF:[3,0,4],MT:[3,5,3],TO:[3,9,2],PAST:[4,0,4],OCLOCK:[9,5,6],
+ h1:[5,0,3],h2:[6,8,3],h3:[5,6,5],h4:[6,0,4],h5:[6,4,4],h6:[5,3,3],h7:[8,0,5],h8:[7,0,5],h9:[4,7,4],h10:[9,0,3],h11:[7,5,6],h12:[8,5,6]},
+f(H,M){const q=M/5|0;let h=H%12||12;if(q>=7)h=h%12+1;
+ const t=[["OCLOCK"],["MF","PAST"],["MT","PAST"],["A","QUARTER","PAST"],["TWENTY","PAST"],["TWENTY","MF","PAST"],["HALF","PAST"],["TWENTY","MF","TO"],["TWENTY","TO"],["A","QUARTER","TO"],["MT","TO"],["MF","TO"]][q];
+ return ["IT","IS"].concat(t,hours(h));}};
+
+/* ---------- Français ---------- */
+L.fr={name:"Français",rows:["ILNESTODEUX","QUATRETROIS","NEUFUNESEPT","HUITSIXCINQ","MIDIXMINUIT","ONZERHEURES","MOINSOLEDIX","ETRQUARTPMD","VINGT-CINQU","ETSDEMIEPAM"],
+W:{IL:[0,0,2],EST:[0,3,3],
+ h1:[2,4,3],h2:[0,7,4],h3:[1,6,5],h4:[1,0,6],h5:[3,7,4],h6:[3,4,3],h7:[2,7,4],h8:[3,0,4],h9:[2,0,4],h10:[4,2,3],h11:[5,0,4],
+ MIDI:[4,0,4],MINUIT:[4,5,6],HEURE:[5,5,5],HEURES:[5,5,6],
+ MOINS:[6,0,5],LE:[6,6,2],MDIX:[6,8,3],ETQ:[7,0,2],QUART:[7,3,5],VINGT:[8,0,5],TIRET:[8,5,1],MCINQ:[8,6,4],ETD:[9,0,2],DEMIE:[9,3,5]},
+f(H,M){const q=M/5|0;let h=(H+(q>=7?1:0))%24;
+ const w=["IL","EST"];
+ if(h===0)w.push("MINUIT");else if(h===12)w.push("MIDI");else{const n=h%12;w.push("h"+n,n===1?"HEURE":"HEURES");}
+ const t=[[],["MCINQ"],["MDIX"],["ETQ","QUART"],["VINGT"],["VINGT","TIRET","MCINQ"],["ETD","DEMIE"],["MOINS","VINGT","TIRET","MCINQ"],["MOINS","VINGT"],["MOINS","LE","QUART"],["MOINS","MDIX"],["MOINS","MCINQ"]][q];
+ return w.concat(t);}};
+
+/* ---------- Farben ---------- */
+const WALLS=[
+ {n:"Schwarz",c:"#0b0b0c"},{n:"Anthrazit",c:"#2b2d31"},{n:"Gelb",c:"#e6b92e"},{n:"Weiß",c:"#efeeea"},{n:"Grau",c:"#8b8d90"},
+ {n:"Sand",c:"#d6c8ad"},{n:"Blau",c:"#2f4a6b"},{n:"Grün",c:"#41584a"},{n:"Rot",c:"#8e2f2b"}];
+const FRONTS=[
+ {n:"Schwarz",c:"#1b1c1e"},{n:"Weiß",c:"#dcdbd6"},{n:"Stahl",c:"#a4a7ab"},{n:"Gold",c:"#b48a35"},
+ {n:"Blau",c:"#2f4a6b"},{n:"Grün",c:"#41584a"},{n:"Rot",c:"#8e2f2b"}];
+const lum=(hex)=>{const n=parseInt(hex.slice(1),16);return(.2126*(n>>16&255)+.7152*(n>>8&255)+.0722*(n&255))/255};
+
+/* ---------- Zustand ---------- */
+const KEY="wortuhr-settings2";
+let st={lang:"de",wall:"#0b0b0c",front:"#1b1c1e"};
+try{const s=JSON.parse(localStorage.getItem(KEY)||"null");if(s)Object.assign(st,s);else{const o=localStorage.getItem("wortuhr-lang");if(o)st.lang=o}}catch(e){}
+if(!L[st.lang])st.lang="de";
+const hexOk=v=>/^#[0-9a-f]{6}$/i.test(v);
+if(!hexOk(st.wall))st.wall="#0b0b0c";if(!hexOk(st.front))st.front="#1b1c1e";
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(st))}catch(e){}};
+
+/* ---------- Uhr ---------- */
+const frame=document.getElementById("frame"),grid=document.getElementById("grid"),dots=[...document.querySelectorAll(".dot")];
+const cells=[];for(let i=0;i<110;i++){const s=document.createElement("span");grid.appendChild(s);cells.push(s)}
+
+function setLang(k){
+  st.lang=k;const lg=L[k];
+  lg.rows.forEach((r,y)=>[...r].forEach((ch,x)=>cells[y*11+x].textContent=ch));
+  document.documentElement.lang={de:"de",sw:"de",en:"en",fr:"fr"}[k];
+  save();render();syncUI();
+}
+function render(){
+  const d=new Date(),lg=L[st.lang],on=new Set();
+  lg.f(d.getHours(),d.getMinutes()).forEach(k=>{const p=lg.W[k];if(!p)return;const[r,c,l]=p;for(let i=0;i<l;i++)on.add(r*11+c+i)});
+  cells.forEach((s,i)=>s.classList.toggle("on",on.has(i)));
+  const e=d.getMinutes()%5;dots.forEach((x,i)=>x.classList.toggle("on",i<e));
+}
+function applyWall(){
+  const r=document.documentElement;r.style.setProperty("--wall",st.wall);
+  r.style.setProperty("--ui",lum(st.wall)>.55?"#222":"#dcdcdc");
+}
+function applyFront(){
+  const light=lum(st.front)>.55;
+  frame.style.background="linear-gradient(135deg,rgba(255,255,255,.12),rgba(255,255,255,0) 45%,rgba(0,0,0,.14)),"+st.front;
+  frame.style.setProperty("--off",light?"rgba(0,0,0,.28)":"rgba(255,255,255,.14)");
+  frame.style.setProperty("--on","#fffaf0");
+  frame.style.setProperty("--glow",light?"255,205,110":"255,244,220");
+}
+
+/* ---------- Vollbild ---------- */
+const root=document.documentElement;
+const fsEl=()=>document.fullscreenElement||document.webkitFullscreenElement;
+const canFs=!!(root.requestFullscreen||root.webkitRequestFullscreen);
+if(!canFs)document.body.classList.add("nofs");
+function toggleFs(){
+  if(fsEl()){(document.exitFullscreen||document.webkitExitFullscreen).call(document)}
+  else{const p=(root.requestFullscreen||root.webkitRequestFullscreen).call(root);if(p&&p.catch)p.catch(()=>{})}
+}
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev,syncUI));
+document.getElementById("fs").addEventListener("click",toggleFs);
+
+/* ---------- Einstellungsmenü ---------- */
+const h=(t,a={},...k)=>{const e=document.createElement(t);
+  for(const[n,v]of Object.entries(a)){if(n==="class")e.className=v;else if(n==="style")e.style.cssText=v;else if(n.startsWith("on"))e.addEventListener(n.slice(2),v);else e.setAttribute(n,v)}
+  k.flat().forEach(c=>e.append(c));return e};
+const sheet=document.getElementById("sheet"),gear=document.getElementById("gear");
+const langBtns={},wallBtns=[],frontBtns=[];
+let fsBtn,wallPick,frontPick;
+
+function swatches(list,key,btns,apply,pickRef){
+  return h("div",{class:"sws"},
+    list.map(o=>{const b=h("button",{class:"sw",title:o.n,"aria-label":o.n,"aria-pressed":"false","data-c":o.c,style:"background:"+o.c,
+      onclick:()=>{st[key]=o.c;save();apply();syncUI()}});btns.push(b);return b}),
+    h("label",{class:"pick"},pickRef,"Eigene"));
+}
+function buildSheet(){
+  wallPick=h("input",{type:"color",value:st.wall,"aria-label":"Eigene Hintergrundfarbe",oninput:e=>{st.wall=e.target.value;save();applyWall();syncUI()}});
+  frontPick=h("input",{type:"color",value:st.front,"aria-label":"Eigene Uhrfarbe",oninput:e=>{st.front=e.target.value;save();applyFront();syncUI()}});
+  fsBtn=h("button",{id:"fsBtn",class:"pill",onclick:toggleFs},"Vollbild");
+  sheet.append(
+    h("header",{},h("h2",{},"Einstellungen"),h("button",{class:"x","aria-label":"Schließen",onclick:closeSheet},"×")),
+    h("h3",{},"Sprache"),
+    h("div",{class:"row"},Object.keys(L).map(k=>{const b=h("button",{class:"pill","aria-pressed":"false",onclick:()=>setLang(k)},L[k].name);langBtns[k]=b;return b})),
+    h("h3",{},"Hintergrundfarbe"),swatches(WALLS,"wall",wallBtns,applyWall,wallPick),
+    h("h3",{},"Uhrfarbe"),swatches(FRONTS,"front",frontBtns,applyFront,frontPick),
+    h("h3",{},"Anzeige"),h("div",{class:"row"},fsBtn)
+  );
+}
+function syncUI(){
+  for(const k in langBtns)langBtns[k].setAttribute("aria-pressed",k===st.lang);
+  wallBtns.forEach(b=>b.setAttribute("aria-pressed",b.dataset.c===st.wall));
+  frontBtns.forEach(b=>b.setAttribute("aria-pressed",b.dataset.c===st.front));
+  if(wallPick)wallPick.value=st.wall;if(frontPick)frontPick.value=st.front;
+  if(fsBtn)fsBtn.textContent=fsEl()?"Vollbild beenden":"Vollbild";
+}
+function openSheet(){document.body.classList.add("open");sheet.querySelector(".x").focus({preventScroll:true})}
+function closeSheet(){document.body.classList.remove("open");gear.focus({preventScroll:true})}
+gear.addEventListener("click",()=>document.body.classList.contains("open")?closeSheet():openSheet());
+document.getElementById("scrim").addEventListener("click",closeSheet);
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("open"))closeSheet()});
+
+buildSheet();
+applyWall();applyFront();
+setLang(st.lang);
+setInterval(render,1000);
+</script>
+</body>
+</html>
