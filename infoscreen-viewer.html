@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infoscreen-Viewer</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1d2733; --muted:#6b7785; --accent:#1f6feb; --border:#d8dee4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14181d; --card:#1c222a; --text:#e6ebf0; --muted:#8b97a5; --accent:#58a6ff; --border:#2d3640; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; }
+  h1 { font-size:18px; margin:0 0 10px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+  input[type=text], input[type=number], select, textarea {
+    padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:14px;
+  }
+  input[type=text] { flex:1 1 320px; min-width:0; }
+  button { padding:8px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-size:14px; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  label { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  #status { font-size:13px; color:var(--muted); }
+  #status.err { color:#d1242f; }
+  main { padding:16px; }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+  .tab { padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--card); cursor:pointer; font-size:13px; color:var(--text); }
+  .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:14px; overflow-x:auto; }
+  .card h2 { font-size:15px; margin:0 0 8px; color:var(--muted); font-weight:600; }
+  table { border-collapse:collapse; width:100%; font-size:15px; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  pre.text { white-space:pre-wrap; margin:0; font-family:inherit; font-size:15px; line-height:1.5; }
+  iframe { width:100%; height:78vh; border:1px solid var(--border); border-radius:12px; background:#fff; }
+  details { margin-top:8px; font-size:13px; color:var(--muted); }
+  textarea { width:100%; min-height:110px; font-family:monospace; font-size:12px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Infoscreen-Viewer</h1>
+  <div class="row">
+    <input type="text" id="url" value="https://schule-infoportal.de/infoscreen/?type=teacher&refresh=100&fontsize=24&days=2&future=0&theme=classic&news=&ticker=ende" aria-label="Adresse">
+    <button id="load">Laden</button>
+  </div>
+  <div class="row">
+    <label>Weg:
+      <select id="proxy">
+        <option value="allorigins">AllOrigins</option>
+        <option value="corsproxy">corsproxy.io</option>
+        <option value="codetabs">CodeTabs</option>
+        <option value="custom">Eigener Proxy (siehe unten)</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="auto" checked> Auto-Refresh alle <input type="number" id="sec" value="100" min="15" style="width:70px"> s</label>
+    <label><input type="checkbox" id="scripts"> Skripte der Seite erlauben</label>
+    <span id="status">Bereit.</span>
+  </div>
+  <details>
+    <summary>Erweitert: eigener Proxy / HTML manuell einfügen</summary>
+    <div class="row" style="margin-top:8px">
+      <input type="text" id="customProxy" placeholder="z. B. https://mein-worker.example.workers.dev/?url=">
+    </div>
+    <p>Falls alle öffentlichen Proxys scheitern: Seite im anderen Browser öffnen, Quelltext kopieren (Rechtsklick → Seitenquelltext) und hier einfügen:</p>
+    <textarea id="manual" placeholder="HTML hier einfügen …"></textarea>
+    <div class="row" style="margin-top:6px"><button class="secondary" id="useManual">Eingefügtes HTML anzeigen</button></div>
+  </details>
+</header>
+
+<main>
+  <div class="tabs">
+    <div class="tab active" data-view="extract">Extrahierter Inhalt</div>
+    <div class="tab" data-view="orig">Originalansicht</div>
+  </div>
+  <div id="extract"></div>
+  <div id="orig" class="hidden"><iframe id="frame" title="Originalansicht"></iframe></div>
+</main>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  let timer = null, lastHtml = "", lastUrl = "";
+
+  function setStatus(msg, err) {
+    $("status").textContent = msg;
+    $("status").className = err ? "err" : "";
+  }
+
+  function proxyUrl(kind, target) {
+    const enc = encodeURIComponent(target);
+    switch (kind) {
+      case "allorigins": return "https://api.allorigins.win/raw?url=" + enc;
+      case "corsproxy":  return "https://corsproxy.io/?" + enc;
+      case "codetabs":   return "https://api.codetabs.com/v1/proxy/?quest=" + enc;
+      case "custom":     return $("customProxy").value.trim() + enc;
+    }
+  }
+
+  async function fetchVia(kind, target) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(proxyUrl(kind, target), { signal: ctrl.signal, cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const text = await res.text();
+      if (!text || text.length < 50) throw new Error("leere Antwort");
+      return text;
+    } finally { clearTimeout(t); }
+  }
+
+  async function load() {
+    const target = $("url").value.trim();
+    if (!target) return;
+    lastUrl = target;
+    setStatus("Lade …");
+    const first = $("proxy").value;
+    const order = [first, ...["allorigins", "corsproxy", "codetabs"].filter(k => k !== first)];
+    let lastErr = null;
+    for (const kind of order) {
+      if (kind === "custom" && !$("customProxy").value.trim()) continue;
+      try {
+        const html = await fetchVia(kind, target);
+        lastHtml = html;
+        render(html, target);
+        setStatus("Aktualisiert um " + new Date().toLocaleTimeString("de-DE") + " (" + kind + ")");
+        return;
+      } catch (e) { lastErr = e; }
+    }
+    setStatus("Fehler: " + (lastErr ? lastErr.message : "kein Proxy erreichbar") + " – ggf. HTML manuell einfügen.", true);
+  }
+
+  function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c])); }
+
+  function render(html, baseUrl) {
+    // Originalansicht
+    const base = '<base href="' + esc(baseUrl) + '">';
+    const injected = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + base) : base + html;
+    const frame = $("frame");
+    frame.setAttribute("sandbox", $("scripts").checked ? "allow-scripts" : "");
+    frame.srcdoc = injected;
+
+    // Extrahierter Inhalt
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style, noscript, link, meta").forEach(n => n.remove());
+    const out = $("extract");
+    out.innerHTML = "";
+
+    const tables = [...doc.querySelectorAll("table")];
+    tables.forEach((tb, i) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      const prev = tb.previousElementSibling;
+      const h = document.createElement("h2");
+      h.textContent = (prev && /^H[1-6]$/.test(prev.tagName) && prev.textContent.trim()) || "Tabelle " + (i + 1);
+      card.appendChild(h);
+      const clean = document.createElement("table");
+      tb.querySelectorAll("tr").forEach(tr => {
+        const row = clean.insertRow();
+        tr.querySelectorAll("th, td").forEach(c => {
+          const cell = document.createElement(c.tagName.toLowerCase() === "th" ? "th" : "td");
+          cell.textContent = c.textContent.trim().replace(/\s+/g, " ");
+          const cs = parseInt(c.getAttribute("colspan"), 10);
+          if (cs > 1) cell.colSpan = cs;
+          row.appendChild(cell);
+        });
+      });
+      card.appendChild(clean);
+      out.appendChild(card);
+    });
+
+    // Rest-Text (ohne Tabellen)
+    tables.forEach(t => t.remove());
+    const rest = (doc.body ? doc.body.innerText || doc.body.textContent : "")
+      .split("\n").map(l => l.trim()).filter(Boolean).join("\n");
+    if (rest) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = "<h2>Weitere Texte</h2>";
+      const pre = document.createElement("pre");
+      pre.className = "text";
+      pre.textContent = rest;
+      card.appendChild(pre);
+      out.appendChild(card);
+    }
+    if (!out.children.length) {
+      out.innerHTML = '<div class="card">Keine Inhalte gefunden. Die Seite lädt ihre Daten vermutlich per JavaScript nach – probiere „Originalansicht“ mit „Skripte der Seite erlauben“ oder füge den HTML-Code manuell ein.</div>';
+    }
+  }
+
+  function schedule() {
+    clearInterval(timer);
+    if ($("auto").checked) {
+      const s = Math.max(15, parseInt($("sec").value, 10) || 100);
+      timer = setInterval(load, s * 1000);
+    }
+  }
+
+  document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+    $("extract").classList.toggle("hidden", t.dataset.view !== "extract");
+    $("orig").classList.toggle("hidden", t.dataset.view !== "orig");
+  }));
+
+  $("load").addEventListener("click", load);
+  $("auto").addEventListener("change", schedule);
+  $("sec").addEventListener("change", schedule);
+  $("scripts").addEventListener("change", () => { if (lastHtml) render(lastHtml, lastUrl || $("url").value); });
+  $("url").addEventListener("keydown", e => { if (e.key === "Enter") load(); });
+  $("useManual").addEventListener("click", () => {
+    const h = $("manual").value;
+    if (!h.trim()) return;
+    lastHtml = h; lastUrl = $("url").value.trim();
+    render(h, lastUrl);
+    setStatus("Manuell eingefügtes HTML angezeigt.");
+  });
+
+  load();
+  schedule();
+})();
+</script>
+</body>
+</html>
