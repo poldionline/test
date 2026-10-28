@@ -329,9 +329,11 @@
   }
 
   function download(blobOrUrl, filename) {
+    const url = typeof blobOrUrl === "string" ? blobOrUrl : URL.createObjectURL(blobOrUrl);
     const a = document.createElement("a");
-    a.href = typeof blobOrUrl === "string" ? blobOrUrl : URL.createObjectURL(blobOrUrl);
-    a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    if (typeof blobOrUrl !== "string") setTimeout(() => URL.revokeObjectURL(url), 15000);
   }
 
   function addThumb() {
@@ -339,8 +341,7 @@
     img.src = cv.toDataURL("image/jpeg", 0.6);
     img.title = current.name;
     const snap = { ...current };
-    const full = cv.toDataURL("image/png");
-    img.onclick = () => { download(full, snap.name + ".png"); };
+    cv.toBlob(b => { img.onclick = () => download(b, snap.name + ".png"); }, "image/png");
     $("gallery").prepend(img);
   }
 
