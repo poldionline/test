@@ -80,9 +80,10 @@ async function osrm(a,b){const r=await(await fetch(`https://router.project-osrm.
  if(!r.routes?.length)throw Error('Keine Straßenroute gefunden');const x=r.routes[0];return{pts:x.geometry.coordinates.map(c=>[c[1],c[0]]),len:x.distance,dur:x.duration}}
 async function overpass(pts,rad){const s=[pts[0]];for(const p of pts)if(dist(s[s.length-1],p)>1000)s.push(p);s.push(pts[pts.length-1]);
  const co=s.map(p=>p[0].toFixed(5)+','+p[1].toFixed(5)).join(',');
- const q=`[out:json][timeout:60];way["highway"~"^(track|unclassified|residential|service|living_street|tertiary|tertiary_link|secondary|secondary_link|primary|primary_link|road)$"](around:${rad},${co});out geom;`;
- let err;for(const u of['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){try{
-  const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q)});if(!r.ok)throw Error('Overpass '+r.status);return(await r.json()).elements}catch(e){err=e}}
+ const q=`[out:json][timeout:40];way["highway"~"^(track|unclassified|residential|service|living_street|tertiary|tertiary_link|secondary|secondary_link|primary|primary_link|road)$"](around:${rad},${co});out geom;`;
+ let err;for(const u of['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter']){try{
+  const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});if(!r.ok)throw Error('Overpass '+r.status);
+  const j=await r.json(),el=(j.elements||[]).filter(x=>x.geometry);if(!el.length)throw Error(j.remark?j.remark.slice(0,90):'Overpass lieferte keine Wege');return el}catch(e){err=e}}
  throw err}
 const NEU={primary:1,primary_link:1,secondary:1,secondary_link:1,tertiary:1,tertiary_link:1,unclassified:1.1,road:1.3,residential:1.3,living_street:1.6,service:1.5,track:2.5};
 const FLD={primary:8,primary_link:8,secondary:5,secondary_link:5,tertiary:2.5,tertiary_link:2.5,unclassified:.5,road:.8,residential:1.5,living_street:2,service:.6,track:.25};
@@ -102,12 +103,14 @@ function findPath(els,a,b,k,o){const g=new Map(),pos=new Map();let minF=1;
   for(let i=1;i<w.nodes.length;i++){const p=w.geometry[i-1],q=w.geometry[i];if(!p||!q)continue;
    const u=w.nodes[i-1],v=w.nodes[i];pos.set(u,[p.lat,p.lon]);pos.set(v,[q.lat,q.lon]);
    const len=dist(pos.get(u),pos.get(v)),e=[len,len*f,h];if(fw)add(u,v,e);if(bw)add(v,u,e)}}
- const snap=p=>{let bn=null,bd=500;for(const[n,q]of pos){if(!g.has(n))continue;const d=dist(p,q);if(d<bd){bd=d;bn=n}}return bn};
- const s=snap(a),t=snap(b);if(s==null||t==null)return null;const tp=pos.get(t),hh=n=>dist(pos.get(n),tp)*minF;
- const D=new Map([[s,0]]),prev=new Map(),hp=new Heap();hp.push(hh(s),s);
- while(hp.size){const[f,u]=hp.pop();if(u===t)break;const du=D.get(u);if(f>du+hh(u)+1e-6)continue;
+ const near=(p,n,r)=>{const l=[];for(const[id,q]of pos){if(!g.has(id))continue;const d=dist(p,q);if(d<r)l.push([d,id])}return l.sort((x,y)=>x[0]-y[0]).slice(0,n)};
+ const S=near(a,10,800),T=near(b,10,800);if(!S.length||!T.length)return{err:`Start/Ziel nicht am Wegenetz (${g.size} Knoten)`};
+ const tset=new Set(T.map(x=>x[1])),hh=n=>dist(pos.get(n),b)*minF;
+ const D=new Map(),prev=new Map(),hp=new Heap();let t=null;
+ for(const[d,id]of S){D.set(id,d);hp.push(d+hh(id),id)}
+ while(hp.size){const[f,u]=hp.pop();const du=D.get(u);if(f>du+hh(u)+1e-6)continue;if(tset.has(u)){t=u;break}
   for(const e of g.get(u)||[]){const nd=du+e[2];if(nd<(D.get(e[0])??1e18)){D.set(e[0],nd);prev.set(e[0],[u,e]);hp.push(nd+hh(e[0]),e[0])}}}
- if(!prev.has(t)&&s!==t)return null;
+ if(t==null)return{err:`kein durchgehender Pfad (${g.size} Knoten, ${S.length} Start-/${T.length} Zielknoten)`};
  const path=[],edges=[];for(let n=t;n!==undefined;){path.push(pos.get(n));const pr=prev.get(n);if(!pr)break;edges.push(pr[1]);n=pr[0]}
  path.reverse();let len=0,dur=0,tr=0;for(const e of edges){len+=e[1];dur+=e[1]/(SPD[e[3]]/3.6);if(e[3]==='track')tr+=e[1]}
  return{pts:[a,...path,b],dur:dur+(dist(a,path[0])+dist(path.at(-1),b))/5,share:Math.round(100*tr/(len||1))}}
@@ -119,7 +122,7 @@ async function calc(re){if(busy)return;if(!dest)return status('Bitte zuerst ein 
   if(fast.len>80000){status('Für Feldweg-Modus zu weit (max. 80 km) – schnellste Route');setRoute(fast.pts,fast.dur,'Schnellste Route',!re);return}
   const k=+m;status('Lade Wegenetz …');const els=await overpass(fast.pts,k>.9?2500:1500);status('Berechne Feldweg-Route …');
   await new Promise(r=>setTimeout(r,30));const r=findPath(els,a,dest,k,{agri:$('agri').checked});
-  if(!r){status('Kein befahrbarer Feldweg-Pfad – zeige schnellste Route');setRoute(fast.pts,fast.dur,'Schnellste Route',!re)}
+  if(!r||r.err){setRoute(fast.pts,fast.dur,'Schnellste Route',!re);status('⚠ Feldweg-Modus fehlgeschlagen: '+(r&&r.err||'kein Pfad')+' ('+els.length+' Wege geladen). Schnellste Route gezeigt.')}
   else setRoute(r.pts,r.dur,`Feldweg-Route (${r.share} % Feldwege)`,!re)
  }catch(e){status('Fehler: '+e.message)}finally{busy=false}}
 
