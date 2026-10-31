@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Feldweg-Navi</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0;font:15px system-ui,sans-serif}
+#map{position:absolute;inset:0}
+#top{position:absolute;z-index:1000;left:8px;right:8px;top:calc(8px + env(safe-area-inset-top,0px))}
+#sr{display:flex;gap:6px}
+input[type=text],select{flex:1;padding:12px;border:1px solid #bbb;border-radius:10px;font-size:16px;width:100%}
+button{padding:12px 14px;border:0;border-radius:10px;background:#1a73e8;color:#fff;font-size:15px;font-weight:600}
+button:disabled{background:#9ab}
+#res div{background:#fff;padding:11px;border-bottom:1px solid #ddd;color:#111}
+#res{border-radius:10px;overflow:hidden;margin-top:4px}
+#hud{position:absolute;z-index:1001;left:8px;right:8px;top:calc(8px + env(safe-area-inset-top,0px));background:#0b3d91;color:#fff;border-radius:12px;padding:12px;display:flex;gap:12px;align-items:center}
+#hud[hidden]{display:none}#arrow{font-size:38px}#ins{font-size:20px;display:block}
+#bot{position:absolute;z-index:1000;left:8px;right:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));background:#fff;color:#111;border-radius:14px;padding:10px;display:grid;gap:8px;box-shadow:0 2px 12px #0004}
+#bot label{font-size:13px;display:flex;gap:6px;align-items:flex-start}
+.row{display:flex;gap:8px}.row button{flex:1}
+#info{font-weight:600}small{color:#555;font-size:11px}
+#loc{position:absolute;z-index:1000;right:12px;bottom:200px;width:48px;height:48px;border-radius:50%;background:#fff;color:#1a73e8;font-size:22px;box-shadow:0 2px 8px #0005}
+body.nav #opts{display:none}
+@media(prefers-color-scheme:dark){#bot{background:#1d1f23;color:#eee}small{color:#aaa}}
+</style></head><body>
+<div id="map"></div>
+<div id="top"><div id="sr"><input type="text" id="q" placeholder="Ziel suchen (Adresse, Ort) – oder auf Karte tippen" enterkeyhint="search"><button id="go">🔍</button></div><div id="res"></div></div>
+<div id="hud" hidden><span id="arrow">⬆</span><div><b id="ins"></b><small id="sub" style="color:#cde"></small></div></div>
+<button id="loc" title="Zentrieren">◎</button>
+<div id="bot">
+ <div id="opts" style="display:grid;gap:8px">
+  <select id="mode"><option value="fast">Schnellste Route (normal)</option><option value="0.7">Feldwege bevorzugen</option><option value="1" selected>Engste Feldwege (Maximum)</option></select>
+  <label><input type="checkbox" id="agri"> Auch Wege „nur land-/forstwirtschaftlicher Verkehr“ und Tracktype 5 zulassen (eigene Verantwortung)</label>
+ </div>
+ <div id="info">Warte auf GPS …</div>
+ <div class="row"><button id="calc">Route berechnen</button><button id="start" disabled>▶ Start</button></div>
+ <small>Nur bei stehendem Fahrzeug bedienen. Wegesperrungen, Schilder und StVO haben Vorrang vor der Navigation. Kartendaten © OpenStreetMap – Wegezustand/Befahrbarkeit nicht garantiert.</small>
+</div>
+<script>
+const $=id=>document.getElementById(id),R=6371000,rad=Math.PI/180;
+const dist=(a,b)=>Math.hypot((b[1]-a[1])*rad*Math.cos((a[0]+b[0])/2*rad),(b[0]-a[0])*rad)*R;
+const brg=(a,b)=>{const y=Math.sin((b[1]-a[1])*rad)*Math.cos(b[0]*rad),x=Math.cos(a[0]*rad)*Math.sin(b[0]*rad)-Math.sin(a[0]*rad)*Math.cos(b[0]*rad)*Math.cos((b[1]-a[1])*rad);return(Math.atan2(y,x)/rad+360)%360};
+function seg(p,a,b){const c=Math.cos(p[0]*rad)*R*rad,k=R*rad,ax=(a[1]-p[1])*c,ay=(a[0]-p[0])*k,bx=(b[1]-p[1])*c,by=(b[0]-p[0])*k,dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let t=l2?-(ax*dx+ay*dy)/l2:0;t=Math.max(0,Math.min(1,t));return[Math.hypot(ax+t*dx,ay+t*dy),t]}
+class Heap{constructor(){this.a=[]}get size(){return this.a.length}
+push(k,v){const a=this.a;a.push([k,v]);let i=a.length-1;while(i>0){const p=(i-1)>>1;if(a[p][0]<=a[i][0])break;[a[p],a[i]]=[a[i],a[p]];i=p}}
+pop(){const a=this.a,t=a[0],l=a.pop();if(a.length){a[0]=l;let i=0;for(;;){let c=2*i+1;if(c>=a.length)break;if(c+1<a.length&&a[c+1][0]<a[c][0])c++;if(a[i][0]<=a[c][0])break;[a[i],a[c]]=[a[c],a[i]];i=c}}return t}}
+
+const map=L.map('map',{zoomControl:false}).setView([51.1,10.4],6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+let me=null,meMark=null,dest=null,destMark=null,route=null,line=null,follow=true,nav=false,busy=false,lastRe=0,wl=null,first=true;
+const status=t=>$('info').textContent=t;
+const speak=t=>{try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='de-DE';speechSynthesis.speak(u)}catch(e){}};
+
+/* ---------- GPS ---------- */
+navigator.geolocation?navigator.geolocation.watchPosition(p=>{
+ me={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,h:p.coords.heading,v:p.coords.speed};
+ if(!meMark){meMark=L.marker([me.lat,me.lng],{icon:L.divIcon({className:'',html:'<div style="font-size:30px;color:#1a73e8;text-shadow:0 0 3px #fff;transform-origin:50% 55%">▲</div>',iconSize:[30,30],iconAnchor:[15,15]}),interactive:false,zIndexOffset:999}).addTo(map)}
+ meMark.setLatLng([me.lat,me.lng]);
+ if(me.h!=null&&!isNaN(me.h)&&meMark._icon)meMark._icon.firstChild.style.transform=`rotate(${me.h}deg)`;
+ if(first){first=false;map.setView([me.lat,me.lng],14);if(!route)status('GPS bereit – Ziel wählen')}
+ else if(nav&&follow)map.setView([me.lat,me.lng],Math.max(map.getZoom(),17),{animate:true});
+ if(nav)progress();
+},e=>status('GPS-Fehler: '+e.message),{enableHighAccuracy:true,maximumAge:1000,timeout:20000}):status('Kein GPS verfügbar');
+map.on('dragstart',()=>follow=false);
+$('loc').onclick=()=>{follow=true;if(me)map.setView([me.lat,me.lng],Math.max(map.getZoom(),16))};
+
+/* ---------- Ziel ---------- */
+function setDest(lat,lng,name){dest=[lat,lng];if(destMark)destMark.remove();destMark=L.marker(dest).addTo(map);$('res').innerHTML='';status('Ziel: '+(name||'Kartenpunkt')+' – jetzt „Route berechnen“');}
+map.on('click',e=>{if(!nav)setDest(e.latlng.lat,e.latlng.lng)});
+async function search(){const q=$('q').value.trim();if(!q)return;try{
+ const r=await(await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5&accept-language=de&q='+encodeURIComponent(q))).json();
+ $('res').innerHTML='';if(!r.length)return status('Nichts gefunden');
+ r.forEach(x=>{const d=document.createElement('div');d.textContent=x.display_name;d.onclick=()=>{setDest(+x.lat,+x.lon,x.display_name.split(',')[0]);map.setView([x.lat,x.lon],14)};$('res').append(d)});
+}catch(e){status('Suche fehlgeschlagen: '+e.message)}}
+$('go').onclick=search;$('q').onkeydown=e=>{if(e.key==='Enter')search()};
+
+/* ---------- Routing ---------- */
+async function osrm(a,b){const r=await(await fetch(`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`)).json();
+ if(!r.routes?.length)throw Error('Keine Straßenroute gefunden');const x=r.routes[0];return{pts:x.geometry.coordinates.map(c=>[c[1],c[0]]),len:x.distance,dur:x.duration}}
+async function overpass(pts,rad){const s=[pts[0]];for(const p of pts)if(dist(s[s.length-1],p)>1000)s.push(p);s.push(pts[pts.length-1]);
+ const co=s.map(p=>p[0].toFixed(5)+','+p[1].toFixed(5)).join(',');
+ const q=`[out:json][timeout:60];way["highway"~"^(track|unclassified|residential|service|living_street|tertiary|tertiary_link|secondary|secondary_link|primary|primary_link|road)$"](around:${rad},${co});out geom;`;
+ let err;for(const u of['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){try{
+  const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q)});if(!r.ok)throw Error('Overpass '+r.status);return(await r.json()).elements}catch(e){err=e}}
+ throw err}
+const NEU={primary:1,primary_link:1,secondary:1,secondary_link:1,tertiary:1,tertiary_link:1,unclassified:1.1,road:1.3,residential:1.3,living_street:1.6,service:1.5,track:2.5};
+const FLD={primary:8,primary_link:8,secondary:5,secondary_link:5,tertiary:2.5,tertiary_link:2.5,unclassified:.5,road:.8,residential:1.5,living_street:2,service:.6,track:.25};
+const SPD={primary:80,primary_link:50,secondary:70,secondary_link:50,tertiary:60,tertiary_link:40,unclassified:50,road:40,residential:30,living_street:10,service:20,track:20};
+function usable(t,o){const bad=v=>v==='no'||v==='private';
+ if(!(t.motorcar==='yes'||t.motor_vehicle==='yes')&&['access','vehicle','motor_vehicle','motorcar'].some(k=>bad(t[k])))return false;
+ if(!o.agri){if(/agricultural|forestry/.test(t.motor_vehicle||t.vehicle||t.access||''))return false;if(t.tracktype==='grade5')return false}
+ if(['parking_aisle','driveway','drive-through','emergency_access'].includes(t.service))return false;
+ if(['mud','sand'].includes(t.surface)||['very_horrible','impassable','very_bad'].includes(t.smoothness))return false;
+ const w=parseFloat(t.maxwidth||t.width);if(w&&w<2.2)return false;return true}
+function findPath(els,a,b,k,o){const g=new Map(),pos=new Map();let minF=1;
+ const add=(u,v,e)=>{if(!g.has(u))g.set(u,[]);g.get(u).push([v,...e])};
+ for(const w of els){const t=w.tags||{},h=t.highway;if(!NEU[h]||!usable(t,o)||!w.geometry)continue;
+  const grade={grade1:1.1,grade2:1,grade3:.9,grade4:.8,grade5:.7}[t.tracktype]||1;
+  const f=Math.pow(NEU[h],1-k)*Math.pow(FLD[h]*grade,k);if(f<minF)minF=f;
+  const ow=t.junction==='roundabout'?'yes':t.oneway,fw=ow!=='-1',bw=!(ow==='yes'||ow==='1'||ow==='true');
+  for(let i=1;i<w.nodes.length;i++){const p=w.geometry[i-1],q=w.geometry[i];if(!p||!q)continue;
+   const u=w.nodes[i-1],v=w.nodes[i];pos.set(u,[p.lat,p.lon]);pos.set(v,[q.lat,q.lon]);
+   const len=dist(pos.get(u),pos.get(v)),e=[len,len*f,h];if(fw)add(u,v,e);if(bw)add(v,u,e)}}
+ const snap=p=>{let bn=null,bd=500;for(const[n,q]of pos){if(!g.has(n))continue;const d=dist(p,q);if(d<bd){bd=d;bn=n}}return bn};
+ const s=snap(a),t=snap(b);if(s==null||t==null)return null;const tp=pos.get(t),hh=n=>dist(pos.get(n),tp)*minF;
+ const D=new Map([[s,0]]),prev=new Map(),hp=new Heap();hp.push(hh(s),s);
+ while(hp.size){const[f,u]=hp.pop();if(u===t)break;const du=D.get(u);if(f>du+hh(u)+1e-6)continue;
+  for(const e of g.get(u)||[]){const nd=du+e[2];if(nd<(D.get(e[0])??1e18)){D.set(e[0],nd);prev.set(e[0],[u,e]);hp.push(nd+hh(e[0]),e[0])}}}
+ if(!prev.has(t)&&s!==t)return null;
+ const path=[],edges=[];for(let n=t;n!==undefined;){path.push(pos.get(n));const pr=prev.get(n);if(!pr)break;edges.push(pr[1]);n=pr[0]}
+ path.reverse();let len=0,dur=0,tr=0;for(const e of edges){len+=e[1];dur+=e[1]/(SPD[e[3]]/3.6);if(e[3]==='track')tr+=e[1]}
+ return{pts:[a,...path,b],dur:dur+(dist(a,path[0])+dist(path.at(-1),b))/5,share:Math.round(100*tr/(len||1))}}
+
+async function calc(re){if(busy)return;if(!dest)return status('Bitte zuerst ein Ziel wählen');
+ const a=me?[me.lat,me.lng]:[map.getCenter().lat,map.getCenter().lng];busy=true;
+ try{const m=$('mode').value,fast=await osrm(a,dest);
+  if(m==='fast'){setRoute(fast.pts,fast.dur,'Schnellste Route',!re);return}
+  if(fast.len>80000){status('Für Feldweg-Modus zu weit (max. 80 km) – schnellste Route');setRoute(fast.pts,fast.dur,'Schnellste Route',!re);return}
+  const k=+m;status('Lade Wegenetz …');const els=await overpass(fast.pts,k>.9?2500:1500);status('Berechne Feldweg-Route …');
+  await new Promise(r=>setTimeout(r,30));const r=findPath(els,a,dest,k,{agri:$('agri').checked});
+  if(!r){status('Kein befahrbarer Feldweg-Pfad – zeige schnellste Route');setRoute(fast.pts,fast.dur,'Schnellste Route',!re)}
+  else setRoute(r.pts,r.dur,`Feldweg-Route (${r.share} % Feldwege)`,!re)
+ }catch(e){status('Fehler: '+e.message)}finally{busy=false}}
+
+const turnTxt=d=>{const s=d<0?'links':'rechts',a=Math.abs(d);return a<60?`leicht ${s} halten`:a<120?`${s} abbiegen`:`scharf ${s} abbiegen`};
+function makeSteps(pts,cum){const st=[];for(let i=1;i<pts.length-1;i++){let j=i-1;while(j>0&&cum[i]-cum[j]<25)j--;let k=i+1;while(k<pts.length-1&&cum[k]-cum[i]<25)k++;
+ const d=((brg(pts[i],pts[k])-brg(pts[j],pts[i])+540)%360)-180;
+ if(Math.abs(d)>35){const l=st[st.length-1];if(l&&cum[i]-l.at<40){if(Math.abs(d)>Math.abs(l.d)){l.d=d;l.at=cum[i]}}else st.push({at:cum[i],d})}}
+ st.push({at:cum[cum.length-1],d:0,end:true});return st}
+function setRoute(p,dur,label,fit){const pts=[p[0]];for(const q of p.slice(1))if(dist(pts[pts.length-1],q)>.5)pts.push(q);
+ const cum=[0];for(let i=1;i<pts.length;i++)cum[i]=cum[i-1]+dist(pts[i-1],pts[i]);
+ route={pts,cum,len:cum.at(-1),dur,idx:0,off:0,si:0,label,steps:makeSteps(pts,cum)};
+ if(line)line.remove();line=L.polyline(pts,{color:'#1a73e8',weight:6,opacity:.85}).addTo(map);if(fit)map.fitBounds(line.getBounds(),{padding:[60,60]});
+ $('start').disabled=false;if(!nav)status(`${label} · ${(route.len/1000).toFixed(1)} km · ca. ${Math.round(dur/60)} min`)}
+
+/* ---------- Navigation ---------- */
+const fmt=d=>d>=1000?(d/1000).toFixed(1).replace('.',',')+' km':Math.max(10,Math.round(d/10)*10)+' m';
+function progress(){const r=route;if(!r||!me)return;const p=[me.lat,me.lng],full=r.off>=2;let best=1e9,bi=r.idx,bt=0;
+ const from=full?0:Math.max(0,r.idx-3),to=full?r.pts.length-2:Math.min(r.pts.length-2,r.idx+400);
+ for(let i=from;i<=to;i++){const[d,t]=seg(p,r.pts[i],r.pts[i+1]);if(d<best){best=d;bi=i;bt=t}}
+ if(best>Math.max(60,me.acc*1.5)){r.off++;$('ins').textContent='Route verlassen …';if(r.off>=3&&Date.now()-lastRe>15000){lastRe=Date.now();speak('Route wird neu berechnet');calc(true)}return}
+ r.off=0;r.idx=bi;const along=r.cum[bi]+bt*(r.cum[bi+1]-r.cum[bi]),rem=r.len-along;
+ while(r.si<r.steps.length-1&&r.steps[r.si].at<along-10)r.si++;
+ const s=r.steps[r.si],dd=s.at-along,txt=s.end?'Ziel erreicht':turnTxt(s.d);
+ $('arrow').textContent=s.end?'⚑':s.d<0?'⬅':'➡';$('ins').textContent=s.end?`In ${fmt(dd)}: Ziel`:`${fmt(dd)} · ${txt}`;
+ const eta=new Date(Date.now()+rem*(r.dur/r.len)*1000);
+ $('sub').textContent=`Noch ${fmt(rem)} · Ankunft ${eta.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}`+(me.v!=null?` · ${Math.round(me.v*3.6)} km/h`:'');
+ status($('sub').textContent);
+ if(!s.end){if(dd<250&&!s.a){s.a=1;speak(`In ${fmt(dd)} ${txt}`)}if(dd<60&&!s.b){s.b=1;speak(txt)}}
+ if(rem<25){speak('Sie haben Ihr Ziel erreicht');stop()}}
+async function begin(){nav=true;follow=true;document.body.classList.add('nav');$('hud').hidden=false;$('start').textContent='■ Beenden';$('calc').disabled=true;
+ speak('Navigation gestartet');try{wl=await navigator.wakeLock.request('screen')}catch(e){}
+ if(me)map.setView([me.lat,me.lng],17);progress()}
+function stop(){nav=false;document.body.classList.remove('nav');$('hud').hidden=true;$('start').textContent='▶ Start';$('calc').disabled=false;try{wl&&wl.release()}catch(e){}}
+$('calc').onclick=()=>calc(false);
+$('start').onclick=()=>nav?stop():begin();
+</script></body></html>
