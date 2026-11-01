@@ -30,7 +30,7 @@ body.nav #opts{display:none}
 <button id="loc" title="Zentrieren">◎</button>
 <div id="bot">
  <div id="opts" style="display:grid;gap:8px">
-  <select id="mode"><option value="fast">Schnellste Route (normal)</option><option value="0.7">Feldwege bevorzugen</option><option value="1" selected>Engste Feldwege (Maximum)</option></select>
+  <select id="mode"><option value="fast">Schnellste Route (normal)</option><option value="safe">100 % sichere Route (nur befestigte Straßen)</option><option value="0.7">Feldwege bevorzugen</option><option value="1" selected>Engste Feldwege (Maximum)</option></select>
   <label><input type="checkbox" id="agri"> Auch Wege „nur land-/forstwirtschaftlicher Verkehr“ und Tracktype 5 zulassen (eigene Verantwortung)</label>
  </div>
  <div id="info">Warte auf GPS …</div>
@@ -80,7 +80,7 @@ async function osrm(a,b,ex){const r=await(await fetch(`https://router.project-os
  if(!r.routes?.length)throw Error('Keine Straßenroute gefunden');const x=r.routes[0];return{pts:x.geometry.coordinates.map(c=>[c[1],c[0]]),len:x.distance,dur:x.duration,ex:!!ex}}
 async function overpass(pts,rad){const s=[pts[0]];for(const p of pts)if(dist(s[s.length-1],p)>1000)s.push(p);s.push(pts[pts.length-1]);
  const co=s.map(p=>p[0].toFixed(5)+','+p[1].toFixed(5)).join(',');
- const q=`[out:json][timeout:40];way["highway"~"^(track|unclassified|residential|service|living_street|tertiary|tertiary_link|secondary|secondary_link|primary|primary_link|road)$"](around:${rad},${co});out geom;`;
+ const q=`[out:json][timeout:40];(way["highway"~"^(track|unclassified|residential|service|living_street|tertiary|tertiary_link|secondary|secondary_link|primary|primary_link|road)$"](around:${rad},${co});way["landuse"~"^(residential|commercial|retail|industrial)$"](around:${rad},${co}););out geom;`;
  let err;for(const u of['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter']){try{
   const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'data='+encodeURIComponent(q)});if(!r.ok)throw Error('Overpass '+r.status);
   const j=await r.json(),el=(j.elements||[]).filter(x=>x.geometry);if(!el.length)throw Error(j.remark?j.remark.slice(0,90):'Overpass lieferte keine Wege');return el}catch(e){err=e}}
@@ -89,18 +89,23 @@ const NEU={primary:1,primary_link:1,secondary:1,secondary_link:1,tertiary:1,tert
 const FLD={primary:8,primary_link:8,secondary:5,secondary_link:5,tertiary:2.5,tertiary_link:2.5,unclassified:.5,road:.8,residential:1.5,living_street:2,service:.6,track:.25};
 const SPD={primary:80,primary_link:50,secondary:70,secondary_link:50,tertiary:60,tertiary_link:40,unclassified:50,road:40,residential:30,living_street:10,service:20,track:20};
 function usable(t,o){const bad=v=>v==='no'||v==='private';
+ if(o.safe&&(['track','service','living_street'].includes(t.highway)||t.tracktype||/^(unpaved|compacted|fine_gravel|gravel|pebblestone|ground|dirt|earth|grass|grass_paver|sand|mud|woodchips|snow|ice|salt)$/.test(t.surface||'')||t.access==='destination'||t.motor_vehicle==='destination'))return false;
  if(!(t.motorcar==='yes'||t.motor_vehicle==='yes')&&['access','vehicle','motor_vehicle','motorcar'].some(k=>bad(t[k])))return false;
  if(!o.agri){if(/agricultural|forestry/.test(t.motor_vehicle||t.vehicle||t.access||''))return false;if(t.tracktype==='grade5')return false}
  if(['parking_aisle','driveway','drive-through','emergency_access'].includes(t.service))return false;
  if(['mud','sand'].includes(t.surface)||['very_horrible','impassable','very_bad'].includes(t.smoothness))return false;
  const w=parseFloat(t.maxwidth||t.width);if(w&&w<2.2)return false;return true}
 function findPath(els,a,b,k,o){const g=new Map(),pos=new Map();let minF=1;
+ /* Siedlungsflächen: dort keine Feldwege */
+ const areas=els.filter(w=>w.tags&&w.tags.landuse&&w.geometry&&w.geometry.length>3).map(w=>{const ps=w.geometry.map(q=>[q.lat,q.lon]);let a1=1e9,b1=-1e9,c1=1e9,d1=-1e9;for(const q of ps){a1=Math.min(a1,q[0]);b1=Math.max(b1,q[0]);c1=Math.min(c1,q[1]);d1=Math.max(d1,q[1])}return{ps,a:a1,b:b1,c:c1,d:d1}});
+ const urb=(la,lo)=>{for(const z of areas){if(la<z.a||la>z.b||lo<z.c||lo>z.d)continue;let ins=false;for(let i=0,j=z.ps.length-1;i<z.ps.length;j=i++){const A=z.ps[i],B=z.ps[j];if((A[0]>la)!==(B[0]>la)&&lo<(B[1]-A[1])*(la-A[0])/(B[0]-A[0])+A[1])ins=!ins}if(ins)return true}return false};
  const add=(u,v,e)=>{if(!g.has(u))g.set(u,[]);g.get(u).push([v,...e])};
  for(const w of els){const t=w.tags||{},h=t.highway;if(!NEU[h]||!usable(t,o)||!w.geometry)continue;
   const grade={grade1:1.1,grade2:1,grade3:.9,grade4:.8,grade5:.7}[t.tracktype]||1;
   const f=Math.pow(NEU[h],1-k)*Math.pow(FLD[h]*grade,k);if(f<minF)minF=f;
   const ow=t.junction==='roundabout'?'yes':t.oneway,fw=ow!=='-1',bw=!(ow==='yes'||ow==='1'||ow==='true');
   for(let i=1;i<w.nodes.length;i++){const p=w.geometry[i-1],q=w.geometry[i];if(!p||!q)continue;
+   if(h==='track'&&urb((p.lat+q.lat)/2,(p.lon+q.lon)/2))continue;
    const u=w.nodes[i-1],v=w.nodes[i];pos.set(u,[p.lat,p.lon]);pos.set(v,[q.lat,q.lon]);
    const len=dist(pos.get(u),pos.get(v)),e=[len,len*f,h];if(fw)add(u,v,e);if(bw)add(v,u,e)}}
  const near=(p,n,r)=>{const l=[];for(const[id,q]of pos){if(!g.has(id))continue;const d=dist(p,q);if(d<r)l.push([d,id])}return l.sort((x,y)=>x[0]-y[0]).slice(0,n)};
@@ -122,16 +127,16 @@ async function calc(re){if(busy)return;if(!dest)return status('Bitte zuerst ein 
   else{try{fast=await osrm(a,dest,'motorway')}catch(e){fast=await osrm(a,dest)}} /* Korridor/Notfall-Route möglichst ohne Autobahn */
   const lbl=fast.ex?'Straßenroute (ohne Autobahn)':'Schnellste Route';
   if(m==='fast'){setRoute(fast.pts,fast.dur,lbl,!re);return}
-  if(fast.len>80000){status('Für Feldweg-Modus zu weit (max. 80 km)');if(fast.ex)setRoute(fast.pts,fast.dur,lbl,!re);return}
-  const k=+m,o={agri:$('agri').checked};let els,r;
+  if(fast.len>80000){status('Für Feldweg-Modus zu weit (max. 80 km)');if(fast.ex&&m!=='safe')setRoute(fast.pts,fast.dur,lbl,!re);return}
+  const safe=m==='safe',k=safe?0:+m,o=safe?{safe:true}:{agri:$('agri').checked};let els,r;
   for(const rd of k>.9?[2500,4500]:[1500,3000]){
    status('Lade Wegenetz …');els=await overpass(fast.pts,rd);status('Berechne Feldweg-Route …');
    await new Promise(x=>setTimeout(x,30));r=findPath(els,a,dest,k,o);if(r&&!r.err)break}
   if(!r||r.err){
    const why='⚠ Feldweg-Modus fehlgeschlagen: '+(r&&r.err||'kein Pfad')+' ('+els.length+' Wege geladen). ';
-   if(fast.ex){setRoute(fast.pts,fast.dur,lbl,!re);status(why+'Straßenroute ohne Autobahn gezeigt.')}
+   if(fast.ex&&!safe){setRoute(fast.pts,fast.dur,lbl,!re);status(why+'Straßenroute ohne Autobahn gezeigt.')}
    else status(why+'Keine Route (Autobahn-Fallback abgeschaltet).')}
-  else setRoute(r.pts,r.dur,`Feldweg-Route (${r.share} % Feldwege)`,!re)
+  else setRoute(r.pts,r.dur,safe?'Sichere Route (nur befestigte Straßen)':`Feldweg-Route (${r.share} % Feldwege)`,!re)
  }catch(e){status('Fehler: '+e.message)}finally{busy=false}}
 
 const turnTxt=d=>{const s=d<0?'links':'rechts',a=Math.abs(d);return a<60?`leicht ${s} halten`:a<120?`${s} abbiegen`:`scharf ${s} abbiegen`};
