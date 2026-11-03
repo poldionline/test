@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dashcam</title>
+<style>
+:root{--road:#0b0c0e;--rail:#121316;--raise:#1b1d21;--line:#26292e;--text:#eef0f2;--dim:#8a929c;--rec:#ff3b30;--amber:#ffb800;color-scheme:dark;
+font-family:Bahnschrift,"DIN Alternate","Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
+html,body{height:100%;background:var(--road);color:var(--text)}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+@media(orientation:landscape){body{flex-direction:row}}
+button{font:inherit;color:var(--text);background:none;border:0;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+
+.stage{position:relative;flex:1;min-width:0;min-height:0;background:#000;display:grid;place-items:center;overflow:hidden}
+canvas{max-width:100%;max-height:100%;background:#000}
+#idle{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--dim);line-height:1.5;background:radial-gradient(ellipse at 50% 45%,#1a1d22 0,#0a0b0d 75%)}
+#idle::before{content:"";position:absolute;inset:22px;pointer-events:none;background-repeat:no-repeat;
+background-image:linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber)),linear-gradient(var(--amber),var(--amber));
+background-position:0 0,0 0,100% 0,100% 0,0 100%,0 100%,100% 100%,100% 100%;
+background-size:44px 2px,2px 44px,44px 2px,2px 44px,44px 2px,2px 44px,44px 2px,2px 44px}
+#idle svg{width:72px;height:72px;color:var(--amber);margin-bottom:16px}
+#idle b{display:block;color:var(--text);font-size:1.8rem;font-weight:600;margin-bottom:6px}
+#idle p{max-width:30ch}
+
+.rail{background:var(--rail);display:flex;align-items:center;justify-content:space-between;gap:6px;padding:12px 10px}
+.act{width:72px}.rec{width:108px}.ring{width:84px;height:84px}.dot{width:60px;height:60px}.slot{min-width:72px}
+.lb{font-size:.72rem}
+@media(orientation:landscape){.rail{flex-direction:column;width:136px;padding:18px 8px;justify-content:space-around}.act{width:84px}.rec{width:124px}.ring{width:92px;height:92px}.dot{width:68px;height:68px}.lb{font-size:.78rem}}
+.slot{display:flex;flex-direction:column;align-items:center;gap:8px}
+.utils{display:flex;gap:0;justify-self:end}
+.slot{justify-self:start}
+@media(orientation:portrait){.rail{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);justify-content:normal}.act{width:62px}.rail .lb{font-size:.7rem}}
+@media(orientation:landscape){.utils{flex-direction:column}}
+
+.act{display:flex;flex-direction:column;align-items:center;gap:6px;padding:4px}
+.ico{position:relative;display:grid;place-items:center;width:56px;height:56px;border-radius:50%;background:var(--raise);border:1px solid var(--line);transition:background .15s}
+.act:hover .ico{background:#272a30}
+.ico svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.lb{color:var(--dim);text-align:center;line-height:1.2}
+.amber .ico{width:64px;height:64px;background:var(--amber);border-color:var(--amber);color:#1a1300}
+.amber:hover .ico{background:#ffc62e}
+.amber .lb{color:var(--text)}
+.act:disabled{opacity:.4;cursor:default}
+.amber:disabled .ico{background:var(--raise);border-color:var(--line);color:var(--text)}
+#badge{position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--amber);color:#1a1300;font-size:.72rem;font-weight:700;display:grid;place-items:center}
+
+.rec{display:flex;flex-direction:column;align-items:center;gap:8px;padding:4px}
+.ring{border-radius:50%;border:4px solid #fff;display:grid;place-items:center}
+.dot{border-radius:50%;background:var(--rec);transition:width .2s,height .2s,border-radius .2s}
+.rec.on .dot{width:30px!important;height:30px!important;border-radius:7px}
+.rec:hover .dot{filter:brightness(1.12)}
+.rec .lb{color:var(--text)}
+@media(prefers-reduced-motion:reduce){.dot{transition:none}}
+
+.voice{background:var(--raise);border:1px solid var(--line);border-radius:14px;padding:8px 10px;font-size:.78rem;color:var(--dim);text-align:center;line-height:1.3;max-width:120px}
+.voice.hit{background:var(--amber);border-color:var(--amber);color:#1a1300;font-weight:700}
+
+dialog{border:1px solid var(--line);background:var(--rail);color:var(--text);border-radius:18px;padding:0;width:min(640px,94vw);max-height:90dvh;overflow:auto;margin:auto}
+dialog::backdrop{background:rgba(0,0,0,.72)}
+.dh{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 12px 12px 20px;position:sticky;top:0;background:var(--rail);border-bottom:1px solid var(--line);z-index:1}
+.dh h2{font-size:1.15rem;font-weight:600}
+.dh small{color:var(--dim);margin-left:10px;font-size:.9rem;font-variant-numeric:tabular-nums}
+.x{width:44px;height:44px;border-radius:50%;display:grid;place-items:center}
+.x:hover{background:var(--raise)}
+.x svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.set{display:grid;gap:4px;padding:8px 20px 20px}
+.set label{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);color:var(--dim)}
+.set label:last-child{border-bottom:0}
+.set label:has(input[type=checkbox]){justify-content:flex-start;color:var(--text)}
+input[type=checkbox]{width:22px;height:22px;accent-color:var(--amber)}
+select,#phrase{font:inherit;background:var(--raise);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+#phrase{flex:1;min-width:0;max-width:300px}
+#list{padding:14px 20px 20px;display:grid;gap:8px}
+.clip{display:flex;gap:10px 12px;align-items:center;padding:10px;background:var(--raise);border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
+.acts{display:flex;gap:6px;width:100%}.acts button{flex:1;padding:8px 6px}
+.th{width:96px;height:54px;border-radius:8px;background:#000;object-fit:cover;flex:none}
+.clip .t{flex:1;min-width:150px}
+.clip .t small{display:block;color:var(--dim);margin-top:2px}
+.clip button,.pill{border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-height:40px;font-size:.9rem}
+.clip button:hover,.pill:hover{background:#2a2e35}
+.tag{background:var(--amber);color:#1a1300;font-weight:700;font-size:.75rem;border-radius:999px;padding:2px 8px;margin-left:6px;vertical-align:1px}
+.empty{color:var(--dim);padding:6px 0}
+#dlg{padding:14px}
+#dlg video{max-width:100%;max-height:70vh;display:block;margin-bottom:12px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="stage">
+  <canvas id="cv" width="1280" height="720"></canvas>
+  <div id="idle"><div>
+    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><circle cx="32" cy="32" r="26"/><circle cx="32" cy="32" r="15"/><circle cx="32" cy="32" r="5" fill="currentColor"/></svg>
+    <b>Dashcam bereit</b><p>Handy in die Halterung, Kamera nach vorn, dann Aufnahme starten.</p></div></div>
+</div>
+<video id="vid" playsinline muted hidden></video>
+
+<nav class="rail" aria-label="Steuerung">
+  <div class="slot">
+    <button id="lock" class="act amber" disabled><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="lb">Clip sichern</span></button>
+    <div class="voice" id="voice" aria-live="polite" hidden>Sprachbefehl aus</div>
+  </div>
+  <button id="go" class="rec"><span class="ring"><i class="dot"></i></span><span class="lb" id="goT">Aufnahme starten</span></button>
+  <div class="utils">
+    <button id="openClips" class="act"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4.5-2.5z"/></svg><b id="badge">0</b></span><span class="lb">Aufnahmen</span></button>
+    <button id="openSet" class="act"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></span><span class="lb">Einstellungen</span></button>
+  </div>
+</nav>
+
+<dialog id="clipDlg">
+  <div class="dh"><div><h2 style="display:inline" id="sum">Aufnahmen</h2><small id="stat">Speicher: 0 MB</small></div><button class="x" data-close aria-label="Schließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="list"><p class="empty">Noch nichts aufgenommen.</p></div>
+</dialog>
+
+<dialog id="setDlg">
+  <div class="dh"><h2>Einstellungen</h2><button class="x" data-close aria-label="Schließen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div class="set">
+    <label>Segmentlänge <select id="segLen"><option value="60">1 min</option><option value="180" selected>3 min</option><option value="300">5 min</option></select></label>
+    <label>Segmente behalten <select id="segMax"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option><option value="20">20</option></select></label>
+    <label>Auflösung <select id="res"><option value="720">720p</option><option value="1080" selected>1080p</option></select></label>
+    <label><input type="checkbox" id="mic"> Ton aufnehmen</label>
+    <label><input type="checkbox" id="gsens" checked> Auto-Sicherung bei Stoß</label>
+    <label><input type="checkbox" id="voiceOn"> Sprachbefehl (offline) aktivieren</label>
+    <label>Satz zum Sichern <input id="phrase" type="text" value="Dashcam sichern" autocomplete="off" spellcheck="false"></label>
+  </div>
+</dialog>
+
+<dialog id="dlg"><video id="pv" controls playsinline></video><button id="dclose" class="pill">Schließen</button></dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d'), vid = $('vid');
+let stream, cs, rec, running = false, segs = [], drawT, rotT, wake, geo, pos = null, lastShock = 0, curSeg = null;
+
+// ---------- Overlay ----------
+const pad = n => String(n).padStart(2, '0');
+const stamp = d => `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()}  ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+const fname = d => `dashcam_${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+
+function pill(x, y, w, h, fill) {
+  ctx.fillStyle = fill; ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, h / 2); else ctx.rect(x, y, w, h);
+  ctx.fill();
+}
+
+function draw() {
+  if (vid.readyState < 2) return;
+  const w = cv.width, h = cv.height, s = Math.min(w, h) / 720, m = 22 * s, ph = 46 * s;
+  const F = (px, wt) => `${wt} ${px * s}px Bahnschrift, "DIN Alternate", "Arial Narrow", sans-serif`;
+  const glass = 'rgba(10,12,15,.6)';
+  ctx.drawImage(vid, 0, 0, w, h);
+  ctx.textBaseline = 'middle';
+  // Zeit + Aufnahmepunkt
+  const t = stamp(new Date());
+  ctx.font = F(24, 600);
+  const tw = ctx.measureText(t).width;
+  pill(m, m, tw + 62 * s, ph, glass);
+  if (running && Math.floor(Date.now() / 600) % 2 === 0) { ctx.fillStyle = '#ff453a'; ctx.beginPath(); ctx.arc(m + 26 * s, m + ph / 2, 7 * s, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+  ctx.fillText(t, m + 46 * s, m + ph / 2 + 1 * s);
+  // Geschwindigkeit
+  const v = pos && pos.speed != null ? String(Math.round(pos.speed * 3.6)) : '--';
+  ctx.font = F(32, 700); const nw = ctx.measureText(v).width;
+  ctx.font = F(17, 500); const uw = ctx.measureText('km/h').width;
+  const sw = nw + uw + 48 * s, sx = w - m - sw;
+  pill(sx, m, sw, ph, glass);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#fff'; ctx.font = F(32, 700);
+  ctx.fillText(v, sx + 22 * s, m + ph / 2 + 1 * s);
+  ctx.font = F(17, 500); ctx.fillStyle = 'rgba(255,255,255,.7)';
+  ctx.fillText('km/h', sx + 28 * s + nw, m + ph / 2 + 4 * s);
+  // Gesichert-Marke
+  if (curSeg && curSeg.locked) {
+    ctx.font = F(22, 700);
+    const lw = ctx.measureText('Gesichert').width + 44 * s;
+    pill(w / 2 - lw / 2, m, lw, ph, '#ffb800');
+    ctx.fillStyle = '#1a1300'; ctx.textAlign = 'center';
+    ctx.fillText('Gesichert', w / 2, m + ph / 2 + 1 * s);
+  }
+  // Koordinaten
+  const c = pos ? `${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}` : 'Kein GPS-Signal';
+  ctx.font = F(19, 500);
+  const cw = ctx.measureText(c).width + 36 * s;
+  pill(m, h - m - 38 * s, cw, 38 * s, glass);
+  ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.textAlign = 'left';
+  ctx.fillText(c, m + 18 * s, h - m - 18 * s);
+}
+
+// ---------- Recording ----------
+function pickMime() {
+  return ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+
+function newSegment() {
+  const mime = pickMime();
+  const r = new MediaRecorder(cs, { mimeType: mime || undefined, videoBitsPerSecond: cv.height >= 1080 ? 6e6 : 3e6 });
+  const chunks = [];
+  const seg = { start: new Date(), locked: false, blob: null, dur: 0, ext: (mime.includes('mp4') ? 'mp4' : 'webm') };
+  r.ondataavailable = e => e.data.size && chunks.push(e.data);
+  r.onstop = () => {
+    if (seg.discard && !seg.locked) { const i = segs.indexOf(seg); if (i > -1) segs.splice(i, 1); render(); return; }
+    seg.dur = Math.round((Date.now() - seg.start) / 1000);
+    seg.blob = new Blob(chunks, { type: r.mimeType || 'video/webm' });
+    prune(); render();
+  };
+  r.start(1000);
+  segs.push(seg); curSeg = seg; rec = r;
+  setTimeout(() => {   // Vorschaubild
+    try { const c = document.createElement('canvas'); c.width = 160; c.height = 90; c.getContext('2d').drawImage(cv, 0, 0, 160, 90); seg.thumb = c.toDataURL('image/jpeg', .6); render(); } catch {}
+  }, 1500);
+  render();
+}
+
+function rotate() {
+  const prev = rec;
+  if (!running) return;
+  newSegment();
+  if (prev.state !== 'inactive') prev.stop();
+}
+
+function prune() {
+  const max = +$('segMax').value;
+  const free = () => segs.filter(s => s.blob && !s.locked);
+  while (free().length > max) {
+    const old = free()[0];
+    segs.splice(segs.indexOf(old), 1);
+  }
+}
+
+async function start() {
+  try {
+    const h = +$('res').value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: h * 16 / 9 }, height: { ideal: h }, frameRate: { ideal: 30 } },
+      audio: $('mic').checked
+    });
+  } catch (e) {
+    alert('Kamera nicht verfügbar: ' + e.message + '\nÖffne die Datei über https:// oder localhost und erlaube den Kamerazugriff.');
+    return;
+  }
+  vid.srcObject = stream; await vid.play();
+  cv.width = vid.videoWidth || 1280; cv.height = vid.videoHeight || 720;
+  cs = cv.captureStream(30);
+  stream.getAudioTracks().forEach(t => cs.addTrack(t));
+  $('idle').hidden = true;
+  running = true;
+  drawT = setInterval(draw, 1000 / 30);
+  newSegment();
+  rotT = setInterval(rotate, +$('segLen').value * 1000);
+  try { wake = await navigator.wakeLock.request('screen'); } catch {}
+  if (navigator.geolocation) geo = navigator.geolocation.watchPosition(p => pos = p.coords, () => pos = null, { enableHighAccuracy: true, maximumAge: 1000 });
+  if ($('gsens').checked) {
+    try { if (DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission(); } catch {}
+    window.addEventListener('devicemotion', onMotion);
+  }
+  $('goT').textContent = 'Aufnahme beenden'; $('go').classList.add('on');
+  $('lock').disabled = false;
+  if ($('voiceOn').checked) startVoice();
+  ['segLen', 'segMax', 'res', 'mic', 'gsens'].forEach(i => $(i).disabled = true);
+}
+
+function stop() {
+  running = false;
+  segs.forEach(s => { if (!s.locked) s.discard = true; });   // ungesicherte Clips verwerfen
+  segs = segs.filter(s => s.locked || !s.blob);
+  clearInterval(rotT); clearInterval(drawT);
+  if (rec && rec.state !== 'inactive') rec.stop();
+  stream && stream.getTracks().forEach(t => t.stop());
+  wake && wake.release().catch(() => {});
+  geo != null && navigator.geolocation.clearWatch(geo);
+  window.removeEventListener('devicemotion', onMotion);
+  curSeg = null; pos = null;
+  $('goT').textContent = 'Aufnahme starten'; $('go').classList.remove('on');
+  stopVoice();
+  $('lock').disabled = true;
+  ['segLen', 'segMax', 'res', 'mic', 'gsens'].forEach(i => $(i).disabled = false);
+  ctx.clearRect(0, 0, cv.width, cv.height); $('idle').hidden = false;
+}
+
+// ---------- Sichern ----------
+function lockNow() {
+  if (!curSeg) return;
+  curSeg.locked = true;
+  const i = segs.indexOf(curSeg);
+  if (i > 0) segs[i - 1].locked = true;   // vorheriges Segment gehört zum Ereignis
+  render();
+}
+
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity; if (!a) return;
+  const g = Math.hypot(a.x || 0, a.y || 0, a.z || 0);
+  if (Math.abs(g - 9.81) > 20 && Date.now() - lastShock > 5000) { lastShock = Date.now(); lockNow(); }
+}
+
+// ---------- Liste ----------
+function render() {
+  const done = segs.filter(s => s.blob).slice().reverse();
+  const total = done.reduce((n, s) => n + s.blob.size, 0);
+  $('stat').textContent = `Speicher: ${(total / 1048576).toFixed(total < 1e7 ? 1 : 0)} MB`;
+  $('badge').textContent = done.length;
+  const list = $('list'); list.innerHTML = '';
+  if (!done.length) { list.innerHTML = '<p class="empty">Noch nichts aufgenommen.</p>'; return; }
+  done.forEach(s => {
+    const row = document.createElement('div'); row.className = 'clip';
+    const mb = (s.blob.size / 1048576).toFixed(1);
+    row.innerHTML = `${s.thumb ? `<img class="th" alt="" src="${s.thumb}">` : '<div class="th"></div>'}<div class="t">${stamp(s.start)}${s.locked ? ' <span class="tag">gesichert</span>' : ''}<small>${Math.floor(s.dur/60)}:${pad(s.dur%60)} min · ${mb} MB</small></div>`;
+    const acts = document.createElement('div'); acts.className = 'acts';
+    const btn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; acts.appendChild(b); };
+    btn('Ansehen', () => { $('pv').src = URL.createObjectURL(s.blob); $('dlg').showModal(); });
+    btn('Speichern', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(s.blob); a.download = fname(s.start) + '.' + s.ext; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); });
+    btn(s.locked ? 'Freigeben' : 'Sichern', () => { s.locked = !s.locked; prune(); render(); });
+    btn('Löschen', () => { segs.splice(segs.indexOf(s), 1); render(); });
+    row.appendChild(acts);
+    list.appendChild(row);
+  });
+}
+
+$('go').onclick = () => running ? stop() : start();
+$('openClips').onclick = () => $('clipDlg').showModal();
+$('openSet').onclick = () => $('setDlg').showModal();
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
+document.querySelectorAll('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+$('dlg').addEventListener('close', () => { $('pv').pause(); $('pv').removeAttribute('src'); });
+// ---------- Sprachbefehl ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let sr = null, wantVoice = false, lastVoice = 0, voiceTimer;
+const norm = t => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const setVoice = (txt, hit) => {
+  $('voice').textContent = txt; $('voice').classList.toggle('hit', !!hit);
+  $('voice').hidden = !wantVoice && !$('voiceOn').checked;
+  $('lock').hidden = wantVoice;   // Button nur, wenn Sprachbefehl aus (oder fehlgeschlagen)
+};
+$('lock').onclick = lockNow;
+
+try { const p = localStorage.getItem('dashcam.phrase'); if (p) $('phrase').value = p; $('voiceOn').checked = localStorage.getItem('dashcam.voice') === '1'; } catch {}
+$('voiceOn').addEventListener('change', () => {
+  try { localStorage.setItem('dashcam.voice', $('voiceOn').checked ? '1' : '0'); } catch {}
+  if (!running) { setVoice($('voiceOn').checked ? 'Sprachbefehl startet mit der Aufnahme' : 'Sprachbefehl aus'); return; }
+  $('voiceOn').checked ? startVoice() : stopVoice();
+});
+$('phrase').addEventListener('change', () => { try { localStorage.setItem('dashcam.phrase', $('phrase').value); } catch {} if (wantVoice) idleVoice(); });
+
+setVoice($('voiceOn').checked ? 'Sprachbefehl startet mit der Aufnahme' : 'Sprachbefehl aus');
+function idleVoice() { setVoice(`Sage „${$('phrase').value.trim()}“`); }
+
+async function startVoice() {
+  // Nur On-Device: kein Fallback auf Cloud-Erkennung
+  if (!SR || typeof SR.available !== 'function' || !('processLocally' in SR.prototype)) {
+    setVoice('Lokale Spracherkennung wird von diesem Browser nicht unterstützt (aktuelles Chrome nötig)'); return;
+  }
+  wantVoice = true;
+  const opt = { langs: ['de-DE'], processLocally: true };
+  try {
+    const st = await SR.available(opt);
+    if (st === 'unavailable') { wantVoice = false; setVoice('Deutsches Offline-Sprachpaket ist hier nicht verfügbar'); return; }
+    if (st !== 'available') {
+      setVoice('Lade deutsches Sprachpaket (einmalig) …');
+      if (!(await SR.install(opt))) { wantVoice = false; setVoice('Sprachpaket konnte nicht installiert werden'); return; }
+    }
+  } catch { wantVoice = false; setVoice('Offline-Spracherkennung konnte nicht vorbereitet werden'); return; }
+  if (!wantVoice) return;
+  sr = new SR();
+  sr.processLocally = true;
+  sr.lang = 'de-DE'; sr.continuous = true; sr.interimResults = true;
+  try { if (window.SpeechRecognitionPhrase) sr.phrases = [new SpeechRecognitionPhrase($('phrase').value.trim(), 3)]; } catch {}
+  sr.onresult = e => {
+    const want = norm($('phrase').value);
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const heard = norm(e.results[i][0].transcript);
+      if (want && heard.includes(want) && Date.now() - lastVoice > 4000) {
+        lastVoice = Date.now(); lockNow();
+        setVoice('Clip gesichert', true);
+        clearTimeout(voiceTimer); voiceTimer = setTimeout(idleVoice, 3000);
+        return;
+      }
+    }
+  };
+  sr.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantVoice = false; setVoice('Mikrofonzugriff für Sprachbefehl verweigert'); }
+    if (e.error === 'language-not-supported') { wantVoice = false; setVoice('Offline-Sprachpaket für Deutsch fehlt'); }
+  };
+  sr.onend = () => { if (wantVoice) setTimeout(() => { try { sr.start(); } catch {} }, 300); };
+  try { sr.start(); idleVoice(); } catch { setVoice('Sprachbefehl konnte nicht starten'); }
+}
+
+function stopVoice() {
+  wantVoice = false;
+  clearTimeout(voiceTimer);
+  if (sr) { try { sr.stop(); } catch {} sr = null; }
+  setVoice($('voiceOn').checked ? 'Sprachbefehl startet mit der Aufnahme' : 'Sprachbefehl aus');
+}
+$('dclose').onclick = () => { $('dlg').close(); $('pv').pause(); $('pv').removeAttribute('src'); };
+document.addEventListener('visibilitychange', async () => {
+  if (running && document.visibilityState === 'visible') { try { wake = await navigator.wakeLock.request('screen'); } catch {} }
+});
+window.addEventListener('beforeunload', e => { if (running || segs.some(s => s.blob)) { e.preventDefault(); e.returnValue = ''; } });
+</script>
+</body>
+</html>
