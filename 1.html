@@ -81,11 +81,11 @@ main.fit #cp{position:fixed;left:8px;right:8px;bottom:56px;max-height:70vh;max-h
 <div id="vd" class="row"></div><div id="pe"></div><pre id="cl"></pre>
 <div class="row"><input id="ci" placeholder="Nachricht" style="flex:1;margin:0"><button id="cs">Senden</button></div></div></div></div>
 </main><script>
-const $=i=>document.getElementById(i),S=t=>{if(!gone)$('s').textContent=t},G=h=>{if(gone)return;const g=$('g'),o=g.querySelector('pre'),k=o?{t:o.scrollTop,b:o.scrollTop+o.clientHeight>=o.scrollHeight-6}:null;g.innerHTML=h;fitBoard();
- const n=g.querySelector('pre');if(n&&document.querySelector('main').classList.contains('fit'))n.scrollTop=(!k||k.b)?n.scrollHeight:k.t},
+const $=i=>document.getElementById(i),S=t=>{if(!gone)$('s').textContent=t},G=h=>{if(gone)return;const g=$('g'),o=g.querySelector('pre'),k=o?{t:o.scrollTop,b:o.scrollTop+o.clientHeight>=o.scrollHeight-6}:null;if(g.dataset.h===h)return 0;g.dataset.h=h;SY=scrollY;g.style.minHeight=g.offsetHeight+'px';g.innerHTML=h;fitBoard();
+ const n=g.querySelector('pre');if(n&&document.querySelector('main').classList.contains('fit'))n.scrollTop=(!k||k.b)?n.scrollHeight:k.t;return 1},
 E=t=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),
 f=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
-let B,C,tk=0,TK=null,gone=false,OV=null;
+let SY=0,B,C,tk=0,TK=null,gone=false,OV=null;
 const post=async(p,o)=>{try{return await(await fetch(B+p,{method:'POST',body:JSON.stringify({code:C,...o})})).json()}catch(e){return{error:'connection_failed'}}},
 get=async p=>{try{return await(await fetch(B+p)).json()}catch(e){return{error:'connection_failed'}}},
 poll=(fn,ms=700)=>{const k=++tk;(async function run(){await fn();if(k==tk)setTimeout(run,ms)})()},
@@ -278,7 +278,7 @@ function binokel(j){document.querySelector('main').classList.add('wide');const t
   else if(dab)h+=`<p>Wähle 4 Karten zum Drücken (${sel.length}/4) und Trumpf oder Durch.</p><p>${dabInfo(hand)}</p><div class="row">${[...SU].map(s=>`<button data-t="${s}" style="${tr==s?'background:'+SC[s]+';color:#fff':''}">${SN[s]}</button>`).join('')}</div><div class="row">${['durch','durch_open','unten','unten_open'].map(m=>`<button data-t="${m}" class="${tr==m?'p':''}">${DN[m]}</button>`).join('')}</div><div class="row"><button class="p" data-a="fin" ${sel.length==4&&tr?'':'disabled'}>Drücken &amp; spielen</button><button data-a="giveup">Abgehen (−${v.bid_value})</button></div>`;
   else if(st=='round_over'){hi+=sm;h+=(v.ready.includes(me)?'<p>Warte auf die anderen…</p>':'<button class="p" data-a="ready">Nächste Runde</button>')}
   else if(st=='game_over'){hi+=sm;h+=`<p><b>${v.final?E(v.final.team_names)+' gewinnt die Partie!':''}</b></p>`}
-  if(st=='game_over')endBtn();G('<div class="bk"><div class="bt">'+h+'</div><div class="bi">'+hi+`<pre>${v.log.slice(-(innerWidth>=1000?24:8)).map(E).join('\n')}</pre></div></div>`);fit();
+  if(st=='game_over')endBtn();const ch=G('<div class="bk"><div class="bt">'+h+'</div><div class="bi">'+hi+`<pre>${v.log.slice(-(innerWidth>=1000?24:8)).map(E).join('\n')}</pre></div></div>`);fit();if(ch){scrollTo(0,SY);$('g').style.minHeight=''}
   S(st=='game_over'?'Partie beendet.':st=='round_over'?'Runde beendet.':st=='reveal'?((v.seen||[]).includes(me)?'Warte auf die anderen…':'Tapp ansehen und bestätigen.'):act||(st!='play'&&v.declarer==me&&st!='bid')?'Du bist dran!':'Warte auf '+(v.names[v.active]||'…'))},
  lobby=s=>{if(!$('nn')){G('<input id="nn" maxlength="16" placeholder="Dein Name"><button class="p" id="sv">Namen speichern</button><p id="sl"></p>');
    $('sv').onclick=async()=>{const x=await post('/pick',{token:tok,name:$('nn').value});S(x.ok?'Name gespeichert.':x.error=='name_taken'?'Name schon vergeben.':'Fehler: '+x.error)}}
@@ -346,7 +346,7 @@ const leaveCall=async()=>{if(!CL)return;try{await fetch(B+'/m/leave?code='+enc(C
 $('cx').onclick=leaveCall;
 const exitGame=async ask=>{if(ask&&!confirm('Spiel wirklich verlassen?'))return;if(TK)await post('/leave',{token:TK});else if(OV&&!OV()&&!gone)await post('/control',{action:'resign',color:'b'});OV=null;
  await leaveCall();
- tk++;TK=null;gone=true;document.querySelector('main').classList.remove('wide','fit');onresize=null;$('g').innerHTML='';$('s').textContent='';$('lw').innerHTML='';$('cw').hidden=true;$('cp').hidden=true;$('vd').innerHTML='';$('ex').hidden=true;$('j').hidden=false};
+ tk++;TK=null;gone=true;document.querySelector('main').classList.remove('wide','fit');onresize=null;$('g').innerHTML='';delete $('g').dataset.h;$('g').style.minHeight='';$('s').textContent='';$('lw').innerHTML='';$('cw').hidden=true;$('cp').hidden=true;$('vd').innerHTML='';$('ex').hidden=true;$('j').hidden=false};
 $('xb').onclick=()=>exitGame(true);
 const endBtn=()=>{if(!gone&&!$('eb')){$('lw').innerHTML='<button class="p" id="eb">Zurück zum Start</button>';$('eb').onclick=()=>exitGame(false)}};
 
